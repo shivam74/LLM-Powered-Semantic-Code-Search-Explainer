@@ -1,47 +1,109 @@
 # 🔍 LLM-Powered Semantic Code Search & AI Code Explainer
 
-A modern, full-stack application that lets you semantically search large codebases using natural language and leverage LLMs to explain, debug, and optimize your code — all in a sleek, VSCode-inspired IDE interface.
+A **production-grade AI code intelligence platform**. Upload a codebase or import a GitHub repository, then search it using natural language, chat with an AI that understands your code's structure, and get explanations, bug reports, and optimisations — all powered by a contextual retrieval pipeline inspired by Anthropic's 2024 research.
 
 ---
 
 ## 🌟 Features
 
-- **🔎 Semantic Code Search** — Search your codebase using natural language (e.g., *"Where is authentication handled?"*) instead of exact keyword matching. Powered by vector embeddings.
-- **🤖 AI Code Explainer** — Select any code snippet and ask the AI to explain its logic, detect bugs, or suggest performance optimizations.
-- **📁 Project Management** — Create isolated projects for different codebases. Each project has its own vector index.
-- **📤 File Upload** — Upload individual code files (Python, JS, TS, Go, Rust, Java, C++, and more) to be parsed and indexed.
-- **🐙 GitHub Repo Import** — Paste any public GitHub repository URL and automatically clone, parse, and index all supported code files in one click.
-- **🗑️ Delete Projects & Files** — Remove projects or individual files along with all their associated vector embeddings.
-- **💬 Interactive AI Chat** — Chat with an AI assistant that has context about your code. Ask general questions or trigger specific actions (Explain, Find Bugs, Optimize).
-- **🖥️ Monaco Editor** — View your code files in a full-featured editor with syntax highlighting for 15+ languages.
-- **🔐 JWT Authentication** — Secure, token-based user accounts with full project isolation.
+- **🔎 Hybrid Semantic Search** — Fuses dense vector search with BM25 keyword retrieval using Reciprocal Rank Fusion (RRF). Finds code by *meaning* and by *exact identifier* simultaneously.
+- **📊 Score Transparency** — Every search result surfaces its individual vector score, BM25 score, and fusion score in the UI so you know *why* a chunk was retrieved.
+- **🌲 AST-Aware Chunking** — Code is split at function / class / method boundaries using tree-sitter, not arbitrary character counts. Supports Python, JS, TS, Java, Go, and Rust.
+- **📖 Contextual Enrichment** — Every chunk is prefixed with its file path, module, function signature, imports, and docstring before embedding, dramatically improving recall.
+- **🤖 AI Code Assistant** — Select any snippet and ask the AI to explain, find bugs, or optimise. Context from your entire codebase is automatically retrieved and injected.
+- **📁 Project Management** — Isolated projects, each with their own vector index and BM25 corpus. Full CRUD for projects and files.
+- **📤 File Upload & GitHub Import** — Upload individual files or import an entire public GitHub repository in one click.
+- **🔐 JWT Authentication** — Secure token-based accounts with full project isolation.
+- **📡 Retrieval Debug API** — Inspect chunk metadata, individual vector / BM25 / fusion scores, and re-index projects on demand.
+- **🔁 Optional Cross-Encoder Reranking** — Toggle `ENABLE_RERANKER=true` to add a `BAAI/bge-reranker-base` reranker pass for even higher precision.
 
 ---
 
 ## 🏗️ Architecture
 
+### Retrieval Pipeline (v2.0)
+
 ```
-┌─────────────────┐    ┌──────────────────────┐    ┌──────────────┐
-│  React Frontend │───▶│  FastAPI Backend      │───▶│   MongoDB    │
-│  (Vite + Vite)  │    │  (Python 3.11)        │    │  (Metadata)  │
-│  Monaco Editor  │    │                       │    └──────────────┘
-│  Framer Motion  │    │  ┌─────────────────┐  │    ┌──────────────┐
-└─────────────────┘    │  │ LangChain       │  │───▶│   ChromaDB   │
-                       │  │ Groq LLM        │  │    │  (Vectors)   │
-                       │  │ HF Embeddings   │  │    └──────────────┘
-                       │  └─────────────────┘  │
-                       └──────────────────────┘
+FILE INDEXING
+─────────────────────────────────────────────────────────────────
+Source File
+  │
+  ▼
+ASTChunkerService  (tree-sitter, recursive tree-walk)
+  • Extracts functions, classes, methods as individual chunks
+  • Metadata: filename, language, function_name, class_name,
+    start_line, end_line, decorators, docstring, imports
+  • Fallback: RecursiveCharacterTextSplitter for unsupported langs
+  │
+  ▼
+ContextualEnricher
+  • Builds a structured context header per chunk:
+      File: auth/jwt.py | Language: Python | Module: auth
+      Type: function | Name: verify_token
+      Uses: jwt, fastapi | Description: Validates JWT token
+      ---
+      <raw code>
+  • Optional: Groq LLM generates a 1-sentence summary (ENABLE_LLM_ENRICHMENT)
+  │
+  ┌────────────────────────────────────────┐
+  │                                        │
+  ▼                                        ▼
+ChromaDB                             MongoDB BM25 Index
+(embed enriched text,                (tokenise raw code,
+ store raw + chunk_id in metadata)    persist corpus)
+
+──────────────────────────────────────────────────────────────────
+
+RETRIEVAL QUERY
+─────────────────────────────────────────────────────────────────
+User Query
+  │
+  ├─────────────────────┐
+  ▼                     ▼
+Vector Search         BM25 Search
+score = 1/(1+dist)   score normalised to [0,1]
+(ChromaDB, top-20)   (rank-bm25, top-20)
+  │                     │
+  └──────────┬───────────┘
+             ▼
+     RRF Fusion  (k=60)
+     score = Σ weight / (60 + rank)
+     vector_weight=0.7  bm25_weight=0.3
+             │
+             ▼
+     Cross-Encoder Reranker  ← optional (BAAI/bge-reranker-base)
+     top-20 candidates → top-5 final
+             │
+             ▼
+     Results → API → Frontend
+     (with vector_score, bm25_score, fusion score, chunk metadata)
 ```
+
+### Why This Architecture?
+
+| Problem | Solution |
+|---|---|
+| Arbitrary text splits break function context | AST chunking at semantic boundaries |
+| Embedding model doesn't know *where* code lives | Contextual enrichment prefixes every chunk |
+| Vector search misses exact identifiers | BM25 keyword search catches exact names |
+| BM25 misses semantic meaning | Vector search covers concepts |
+| Neither ranks perfectly | RRF fusion — robust and normalisation-free |
+| Fusion still has noise | Cross-encoder reranker for fine-grained relevance |
+
+---
+
+## 🛠️ Tech Stack
 
 | Layer | Technology |
 |---|---|
 | **Frontend** | React 18, Vite, Tailwind CSS v4, Framer Motion, Monaco Editor |
-| **Backend** | Python 3.11, FastAPI, Motor (Async MongoDB driver) |
-| **LLM Inference** | Groq API (`llama-3.1-8b-instant`) — fast & free |
+| **Backend** | Python 3.11, FastAPI, Motor (async MongoDB) |
+| **AST Chunking** | tree-sitter 0.25+ with recursive tree-walk (Python, JS, TS, Java, Go, Rust) |
 | **Embeddings** | `sentence-transformers/all-MiniLM-L6-v2` via HuggingFace Inference API |
-| **Vector Database** | ChromaDB (embedded, persistent) |
-| **Code Parsing** | LangChain `RecursiveCharacterTextSplitter` with language-aware chunking |
-| **Database** | MongoDB (via Docker) |
+| **Vector Store** | ChromaDB (embedded, persistent) |
+| **Sparse Retrieval** | rank-bm25 (BM25Okapi), corpus persisted in MongoDB |
+| **Reranker** | `BAAI/bge-reranker-base` via HuggingFace Inference API (opt-in) |
+| **LLM** | Groq API — `llama-3.1-8b-instant` (fast & free) |
 | **Orchestration** | Docker Compose |
 
 ---
@@ -50,120 +112,97 @@ A modern, full-stack application that lets you semantically search large codebas
 
 ### Prerequisites
 
-- [Docker Desktop](https://www.docker.com/) (must be **running**)
-- A free [Groq API Key](https://console.groq.com/) (for LLM chat)
-- A free [HuggingFace API Token](https://huggingface.co/settings/tokens) (for embeddings)
+- [Docker Desktop](https://www.docker.com/) installed and running
+- Free [Groq API Key](https://console.groq.com/) — for the AI assistant
+- Free [HuggingFace Token](https://huggingface.co/settings/tokens) — for embeddings
 
-### Setup Instructions
+### Setup
 
-**1. Clone the repository**
 ```bash
 git clone https://github.com/shivam74/LLM-Powered-Semantic-Code-Search-Explainer.git
 cd LLM-Powered-Semantic-Code-Search-Explainer
-```
 
-**2. Configure Environment Variables**
-
-Copy the example file and fill in your keys:
-```bash
 cp .env.example .env
-```
+# Edit .env and fill in your GROQ_API_KEY and HUGGINGFACE_API_KEY
 
-Edit `.env`:
-```env
-MONGODB_URI=mongodb://mongodb:27017/llm_code_search
-JWT_SECRET_KEY=your_super_secret_jwt_key_here
-
-# Required for AI chat features
-GROQ_API_KEY=your_groq_api_key_here
-
-# Required for semantic search (embeddings)
-HUGGINGFACE_API_KEY=your_huggingface_token_here
-
-# Optional fallback
-OPENAI_API_KEY=
-```
-
-**3. Start the Application**
-```bash
 docker compose up --build
 ```
-> ⏳ The first build takes several minutes as it downloads Python dependencies and PyTorch. Subsequent starts are instant due to Docker layer caching.
 
-**4. Access the App**
+### Access
 
 | Service | URL |
 |---|---|
-| 🟢 Frontend UI | [http://localhost:5173](http://localhost:5173) |
-| 🔵 Backend API Docs | [http://localhost:8000/docs](http://localhost:8000/docs) |
+| 🟢 Frontend | [http://localhost:5173](http://localhost:5173) |
+| 🔵 API Docs | [http://localhost:8000/docs](http://localhost:8000/docs) |
 
 ---
 
-## 📖 How to Use
+## ⚙️ Configuration (`.env`)
 
-### 1. Register & Login
-Navigate to the app, create an account, and log in.
+```env
+MONGODB_URI=mongodb://mongodb:27017/llm_code_search
+JWT_SECRET_KEY=your_secret_here
 
-### 2. Create a Project
-From the Dashboard, click **"+ New Project"** and give it a name. Projects act as isolated search scopes.
+# LLM providers (Groq recommended — free and fast)
+GROQ_API_KEY=your_groq_key
+HUGGINGFACE_API_KEY=your_hf_token
 
-### 3. Add Code
+# Retrieval tuning (optional — defaults shown)
+VECTOR_WEIGHT=0.7          # RRF weight for dense retrieval
+BM25_WEIGHT=0.3            # RRF weight for sparse retrieval (must sum to 1.0)
+RETRIEVAL_CANDIDATE_K=20   # Candidates from each backend before fusion
+RETRIEVAL_TOP_K=5          # Final results returned
 
-**Option A — Upload a File:**
-Inside a project, click **"Upload File"** and select any supported code file.
-
-**Option B — Import a GitHub Repository:**
-Click **"Import GitHub Repo"**, paste a public GitHub URL (e.g., `https://github.com/expressjs/express`), and click Import. All supported files will be automatically cloned, parsed, and indexed.
-
-### 4. Semantic Search
-Use the top search bar to ask questions in natural language:
-- *"Where is the routing logic handled?"*
-- *"How are HTTP headers parsed?"*
-- *"Code that sends JSON responses"*
-
-Results are ranked by semantic similarity, not keyword matching.
-
-### 5. AI Assistant
-Select a file in the explorer, highlight code in the editor, then use the right panel to:
-- **Explain Code** — Get a detailed explanation of the selected snippet
-- **Find Bugs** — Detect vulnerabilities and logic errors
-- **Optimize Performance** — Get refactoring suggestions
-- **Ask anything** — Chat freely with context about your codebase
-
-### 6. Manage Projects & Files
-- Hover over a **project card** on the Dashboard → click the 🗑️ icon to delete it (removes all files and embeddings)
-- Hover over a **file** in the sidebar → click the 🗑️ icon to remove it individually
+# Optional features (disabled by default)
+ENABLE_RERANKER=false      # Cross-encoder reranker — adds ~300ms, improves ranking
+ENABLE_LLM_ENRICHMENT=false  # LLM-generated summaries at index time — improves recall
+```
 
 ---
 
-## 📁 Supported File Types
+## 📁 Supported Languages
 
-`.py` `.js` `.jsx` `.ts` `.tsx` `.java` `.go` `.rs` `.cpp` `.c` `.h` `.cs` `.rb` `.php` `.swift` `.kt` `.md` `.json` `.yaml` `.yml` `.toml` `.sh`
-
----
-
-## 🛠️ Tech Stack Choices
-
-- **FastAPI** — High performance, async support, automatic OpenAPI docs, and native Pydantic integration.
-- **Groq API** — Free, ultra-fast LLM inference (up to 800 tok/s) using `llama-3.1-8b-instant`. No GPU required.
-- **HuggingFace Inference API** — Generates semantic embeddings via the `all-MiniLM-L6-v2` model remotely, avoiding heavy local model downloads.
-- **ChromaDB** — Open-source embedded vector database that runs inside the Docker container with no external dependencies.
-- **LangChain** — Language-aware code chunking (`RecursiveCharacterTextSplitter`) and structured prompt engineering.
-- **Monaco Editor** — The engine behind VS Code, providing a premium code viewing experience directly in the browser.
-- **Framer Motion** — Smooth, physics-based animations for a polished UI experience.
-
----
-
-## 🐳 Docker Services
-
-| Container | Image | Port |
+| Language | AST Chunking | Fallback Splitting |
 |---|---|---|
-| `llm_search_frontend` | Node 20 Alpine | `5173` |
-| `llm_search_backend` | Python 3.11 Slim | `8000` |
-| `llm_search_mongodb` | mongo:latest | `27017` (internal) |
+| Python | ✅ tree-sitter | — |
+| JavaScript / JSX | ✅ tree-sitter | — |
+| TypeScript / TSX | ✅ tree-sitter | — |
+| Java | ✅ tree-sitter | — |
+| Go | ✅ tree-sitter | — |
+| Rust | ✅ tree-sitter | — |
+| C, C++, C#, Ruby, PHP, Swift, Kotlin | — | ✅ LangChain splitter |
+| Markdown, JSON, YAML, TOML, Shell | — | ✅ LangChain splitter |
+
+---
+
+## 📡 API Endpoints
+
+### Core
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/auth/register` | Register a new account |
+| POST | `/api/auth/login` | Login (returns JWT) |
+| POST | `/api/files/projects` | Create a project |
+| GET | `/api/files/projects` | List your projects |
+| DELETE | `/api/files/projects/{id}` | Delete a project |
+| POST | `/api/files/upload/{project_id}` | Upload and index a file |
+| DELETE | `/api/files/project/{id}/file/{fid}` | Delete a file |
+| POST | `/api/files/upload/github/{id}` | Import a public GitHub repo |
+| POST | `/api/search/` | Hybrid semantic search |
+| POST | `/api/chat/` | AI code assistant |
+
+### Retrieval Debug
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/retrieval/debug` | Full score breakdown per chunk |
+| GET | `/api/retrieval/chunks/{project_id}` | List all chunk metadata |
+| GET | `/api/retrieval/stats/{project_id}` | Index statistics |
+| POST | `/api/retrieval/reindex/{project_id}` | Re-index with current pipeline |
 
 ---
 
 ## 📝 License
 
-MIT License — feel free to use, modify, and distribute.
+MIT License

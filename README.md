@@ -1,70 +1,169 @@
-# LLM-Powered Semantic Code Search & AI Code Explainer
+# 🔍 LLM-Powered Semantic Code Search & AI Code Explainer
 
-A modern, full-stack application built to semantically search large codebases and leverage LLMs (OpenAI / HuggingFace) to explain, debug, and optimize your code.
+A modern, full-stack application that lets you semantically search large codebases using natural language and leverage LLMs to explain, debug, and optimize your code — all in a sleek, VSCode-inspired IDE interface.
+
+---
 
 ## 🌟 Features
 
-- **Semantic Code Search**: Upload code files (Python, JS, C++, Java) and search using natural language.
-- **AI Code Explainer**: Select snippets of code and ask the AI to explain the logic.
-- **Bug Detection & Optimization**: AI-powered vulnerability detection and performance suggestions.
-- **Interactive IDE Interface**: Built-in Monaco editor with syntax highlighting and side-by-side AI chat.
-- **Authentication**: Secure JWT-based user authentication and project isolation.
-- **Modern UI**: Sleek, responsive, and animated dark-mode interface built with Tailwind CSS & Framer Motion.
+- **🔎 Semantic Code Search** — Search your codebase using natural language (e.g., *"Where is authentication handled?"*) instead of exact keyword matching. Powered by vector embeddings.
+- **🤖 AI Code Explainer** — Select any code snippet and ask the AI to explain its logic, detect bugs, or suggest performance optimizations.
+- **📁 Project Management** — Create isolated projects for different codebases. Each project has its own vector index.
+- **📤 File Upload** — Upload individual code files (Python, JS, TS, Go, Rust, Java, C++, and more) to be parsed and indexed.
+- **🐙 GitHub Repo Import** — Paste any public GitHub repository URL and automatically clone, parse, and index all supported code files in one click.
+- **🗑️ Delete Projects & Files** — Remove projects or individual files along with all their associated vector embeddings.
+- **💬 Interactive AI Chat** — Chat with an AI assistant that has context about your code. Ask general questions or trigger specific actions (Explain, Find Bugs, Optimize).
+- **🖥️ Monaco Editor** — View your code files in a full-featured editor with syntax highlighting for 15+ languages.
+- **🔐 JWT Authentication** — Secure, token-based user accounts with full project isolation.
+
+---
 
 ## 🏗️ Architecture
 
-- **Frontend**: React, Vite, Tailwind CSS v4, Framer Motion, Monaco Editor.
-- **Backend**: Python, FastAPI, Motor (Async MongoDB).
-- **Vector Database**: ChromaDB for fast semantic retrieval.
-- **Embeddings**: `all-MiniLM-L6-v2` via SentenceTransformers.
-- **LLM Orchestration**: LangChain for structured prompt engineering and conversational context.
-- **Deployment**: Docker Compose for easy, consistent orchestration.
+```
+┌─────────────────┐    ┌──────────────────────┐    ┌──────────────┐
+│  React Frontend │───▶│  FastAPI Backend      │───▶│   MongoDB    │
+│  (Vite + Vite)  │    │  (Python 3.11)        │    │  (Metadata)  │
+│  Monaco Editor  │    │                       │    └──────────────┘
+│  Framer Motion  │    │  ┌─────────────────┐  │    ┌──────────────┐
+└─────────────────┘    │  │ LangChain       │  │───▶│   ChromaDB   │
+                       │  │ Groq LLM        │  │    │  (Vectors)   │
+                       │  │ HF Embeddings   │  │    └──────────────┘
+                       │  └─────────────────┘  │
+                       └──────────────────────┘
+```
+
+| Layer | Technology |
+|---|---|
+| **Frontend** | React 18, Vite, Tailwind CSS v4, Framer Motion, Monaco Editor |
+| **Backend** | Python 3.11, FastAPI, Motor (Async MongoDB driver) |
+| **LLM Inference** | Groq API (`llama-3.1-8b-instant`) — fast & free |
+| **Embeddings** | `sentence-transformers/all-MiniLM-L6-v2` via HuggingFace Inference API |
+| **Vector Database** | ChromaDB (embedded, persistent) |
+| **Code Parsing** | LangChain `RecursiveCharacterTextSplitter` with language-aware chunking |
+| **Database** | MongoDB (via Docker) |
+| **Orchestration** | Docker Compose |
+
+---
 
 ## 🚀 Getting Started
 
 ### Prerequisites
 
-- [Docker](https://www.docker.com/) and Docker Compose
-- An API Key from [OpenAI](https://platform.openai.com/) OR [HuggingFace](https://huggingface.co/settings/tokens)
+- [Docker Desktop](https://www.docker.com/) (must be **running**)
+- A free [Groq API Key](https://console.groq.com/) (for LLM chat)
+- A free [HuggingFace API Token](https://huggingface.co/settings/tokens) (for embeddings)
 
 ### Setup Instructions
 
-1. **Clone the repository** (if not already local).
-2. **Configure Environment Variables**:
-   Open the `.env.example` file in the root directory, rename it to `.env`, and fill in your API keys:
-   ```env
-   MONGODB_URI=mongodb://mongodb:27017/llm_code_search
-   JWT_SECRET_KEY=your_super_secret_jwt_key_here
-   
-   # Provide AT LEAST ONE of these keys:
-   OPENAI_API_KEY=your_openai_api_key_here
-   HUGGINGFACE_API_KEY=your_huggingface_api_key_here
-   ```
-   *(Note: The system prioritizes HuggingFace if both are provided based on user preference for free tiers, but defaults to OpenAI if configured).*
+**1. Clone the repository**
+```bash
+git clone https://github.com/shivam74/LLM-Powered-Semantic-Code-Search-Explainer.git
+cd LLM-Powered-Semantic-Code-Search-Explainer
+```
 
-3. **Start the Application using Docker**:
-   ```bash
-   docker-compose up --build -d
-   ```
+**2. Configure Environment Variables**
 
-4. **Access the App**:
-   - **Frontend UI**: [http://localhost:5173](http://localhost:5173)
-   - **Backend API Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
+Copy the example file and fill in your keys:
+```bash
+cp .env.example .env
+```
 
-### How to Use
+Edit `.env`:
+```env
+MONGODB_URI=mongodb://mongodb:27017/llm_code_search
+JWT_SECRET_KEY=your_super_secret_jwt_key_here
 
-1. Navigate to the Frontend UI and **Register** a new account.
-2. Create a new **Project** from the Dashboard.
-3. Inside the project, click **Upload File** to add code files.
-4. The backend will automatically parse, chunk, and embed the code into ChromaDB.
-5. Use the top **Search Bar** to ask semantic questions (e.g., "Where is authentication handled?").
-6. Click on a file to view it in the editor. Highlight code and use the **AI Assistant** sidebar to explain, optimize, or detect bugs!
+# Required for AI chat features
+GROQ_API_KEY=your_groq_api_key_here
+
+# Required for semantic search (embeddings)
+HUGGINGFACE_API_KEY=your_huggingface_token_here
+
+# Optional fallback
+OPENAI_API_KEY=
+```
+
+**3. Start the Application**
+```bash
+docker compose up --build
+```
+> ⏳ The first build takes several minutes as it downloads Python dependencies and PyTorch. Subsequent starts are instant due to Docker layer caching.
+
+**4. Access the App**
+
+| Service | URL |
+|---|---|
+| 🟢 Frontend UI | [http://localhost:5173](http://localhost:5173) |
+| 🔵 Backend API Docs | [http://localhost:8000/docs](http://localhost:8000/docs) |
+
+---
+
+## 📖 How to Use
+
+### 1. Register & Login
+Navigate to the app, create an account, and log in.
+
+### 2. Create a Project
+From the Dashboard, click **"+ New Project"** and give it a name. Projects act as isolated search scopes.
+
+### 3. Add Code
+
+**Option A — Upload a File:**
+Inside a project, click **"Upload File"** and select any supported code file.
+
+**Option B — Import a GitHub Repository:**
+Click **"Import GitHub Repo"**, paste a public GitHub URL (e.g., `https://github.com/expressjs/express`), and click Import. All supported files will be automatically cloned, parsed, and indexed.
+
+### 4. Semantic Search
+Use the top search bar to ask questions in natural language:
+- *"Where is the routing logic handled?"*
+- *"How are HTTP headers parsed?"*
+- *"Code that sends JSON responses"*
+
+Results are ranked by semantic similarity, not keyword matching.
+
+### 5. AI Assistant
+Select a file in the explorer, highlight code in the editor, then use the right panel to:
+- **Explain Code** — Get a detailed explanation of the selected snippet
+- **Find Bugs** — Detect vulnerabilities and logic errors
+- **Optimize Performance** — Get refactoring suggestions
+- **Ask anything** — Chat freely with context about your codebase
+
+### 6. Manage Projects & Files
+- Hover over a **project card** on the Dashboard → click the 🗑️ icon to delete it (removes all files and embeddings)
+- Hover over a **file** in the sidebar → click the 🗑️ icon to remove it individually
+
+---
+
+## 📁 Supported File Types
+
+`.py` `.js` `.jsx` `.ts` `.tsx` `.java` `.go` `.rs` `.cpp` `.c` `.h` `.cs` `.rb` `.php` `.swift` `.kt` `.md` `.json` `.yaml` `.yml` `.toml` `.sh`
+
+---
 
 ## 🛠️ Tech Stack Choices
-- **FastAPI**: Chosen for its high performance, async support, and native Pydantic integration.
-- **LangChain**: Simplifies swapping between OpenAI and HuggingFace models while providing excellent text-splitters for code parsing.
-- **ChromaDB**: An open-source, embedded vector database that runs seamlessly within a Docker container without external dependencies.
-- **Monaco Editor**: The core editor behind VSCode, providing an unparalleled code viewing experience on the web.
+
+- **FastAPI** — High performance, async support, automatic OpenAPI docs, and native Pydantic integration.
+- **Groq API** — Free, ultra-fast LLM inference (up to 800 tok/s) using `llama-3.1-8b-instant`. No GPU required.
+- **HuggingFace Inference API** — Generates semantic embeddings via the `all-MiniLM-L6-v2` model remotely, avoiding heavy local model downloads.
+- **ChromaDB** — Open-source embedded vector database that runs inside the Docker container with no external dependencies.
+- **LangChain** — Language-aware code chunking (`RecursiveCharacterTextSplitter`) and structured prompt engineering.
+- **Monaco Editor** — The engine behind VS Code, providing a premium code viewing experience directly in the browser.
+- **Framer Motion** — Smooth, physics-based animations for a polished UI experience.
+
+---
+
+## 🐳 Docker Services
+
+| Container | Image | Port |
+|---|---|---|
+| `llm_search_frontend` | Node 20 Alpine | `5173` |
+| `llm_search_backend` | Python 3.11 Slim | `8000` |
+| `llm_search_mongodb` | mongo:latest | `27017` (internal) |
+
+---
 
 ## 📝 License
-MIT License
+
+MIT License — feel free to use, modify, and distribute.

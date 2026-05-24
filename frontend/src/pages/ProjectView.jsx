@@ -4,7 +4,24 @@ import api from '../services/api';
 import Editor from '@monaco-editor/react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
+
+// --- Icon Components ---
+const GithubIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M12 0C5.374 0 0 5.373 0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0112 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z"/>
+  </svg>
+);
+
+const TrashIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+  </svg>
+);
+
+const Spinner = ({ small }) => (
+  <span className={`${small ? 'w-3 h-3' : 'w-5 h-5'} border-2 border-white/30 border-t-white rounded-full animate-spin inline-block`}></span>
+);
 
 const ProjectView = () => {
   const { id: projectId } = useParams();
@@ -27,6 +44,16 @@ const ProjectView = () => {
   
   // Editor Ref
   const editorRef = useRef(null);
+
+  // File delete state
+  const [confirmDeleteFileId, setConfirmDeleteFileId] = useState(null);
+  const [deletingFileId, setDeletingFileId] = useState(null);
+
+  // GitHub import state
+  const [isGithubModalOpen, setIsGithubModalOpen] = useState(false);
+  const [githubUrl, setGithubUrl] = useState('');
+  const [isImporting, setIsImporting] = useState(false);
+  const [importResult, setImportResult] = useState(null);
 
   useEffect(() => {
     fetchFiles();
@@ -65,6 +92,40 @@ const ProjectView = () => {
     }
   };
 
+  const handleDeleteFile = async (fileId) => {
+    setDeletingFileId(fileId);
+    try {
+      await api.delete(`/files/project/${projectId}/file/${fileId}`);
+      const updatedFiles = files.filter(f => f.id !== fileId);
+      setFiles(updatedFiles);
+      if (activeFile?.id === fileId) {
+        setActiveFile(updatedFiles.length > 0 ? updatedFiles[0] : null);
+      }
+    } catch (err) {
+      console.error('Delete file failed', err);
+    } finally {
+      setDeletingFileId(null);
+      setConfirmDeleteFileId(null);
+    }
+  };
+
+  const handleGithubImport = async (e) => {
+    e.preventDefault();
+    if (!githubUrl.trim()) return;
+    setIsImporting(true);
+    setImportResult(null);
+    try {
+      const res = await api.post(`/files/upload/github/${projectId}`, { repo_url: githubUrl.trim() });
+      setImportResult({ success: true, data: res.data });
+      fetchFiles();
+    } catch (err) {
+      const detail = err.response?.data?.detail || 'Import failed. Please check the URL and try again.';
+      setImportResult({ success: false, message: detail });
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   const handleSearch = async (e) => {
     e.preventDefault();
     if (!searchQuery.trim()) return;
@@ -89,6 +150,12 @@ const ProjectView = () => {
     if (!editorRef.current) return '';
     const selection = editorRef.current.getSelection();
     return editorRef.current.getModel().getValueInRange(selection);
+  };
+
+  const getLanguage = (filename) => {
+    const ext = filename?.split('.').pop()?.toLowerCase();
+    const langMap = { js: 'javascript', jsx: 'javascript', ts: 'typescript', tsx: 'typescript', py: 'python', rs: 'rust', go: 'go', java: 'java', cs: 'csharp', cpp: 'cpp', c: 'c', rb: 'ruby', php: 'php', md: 'markdown', json: 'json', yaml: 'yaml', yml: 'yaml' };
+    return langMap[ext] || 'plaintext';
   };
 
   const handleChatSubmit = async (e, action = 'general') => {
@@ -126,26 +193,37 @@ const ProjectView = () => {
   };
 
   return (
-    <div className="flex h-full -m-6"> {/* Negative margin to offset DashboardLayout padding */}
+    <div className="flex h-full -m-6">
       {/* File Explorer - Left Sidebar */}
       <div className="w-64 bg-gray-900 border-r border-gray-700 flex flex-col h-full">
-        <div className="p-4 border-b border-gray-700">
-          <label className="w-full flex justify-center items-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-gray-800 hover:bg-gray-700 cursor-pointer transition-colors">
+        <div className="p-3 border-b border-gray-700 flex flex-col gap-2">
+          {/* Upload File Button */}
+          <label className="w-full flex justify-center items-center py-2 px-3 border border-transparent text-sm font-medium rounded-md text-white bg-gray-800 hover:bg-gray-700 cursor-pointer transition-colors">
             <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
             Upload File
             <input type="file" className="hidden" onChange={handleFileUpload} />
           </label>
+
+          {/* Import GitHub Repo Button */}
+          <button
+            onClick={() => { setIsGithubModalOpen(true); setImportResult(null); setGithubUrl(''); }}
+            className="w-full flex justify-center items-center py-2 px-3 border border-transparent text-sm font-medium rounded-md text-white bg-gray-800 hover:bg-purple-800/60 hover:border-purple-700 cursor-pointer transition-colors gap-2"
+          >
+            <GithubIcon />
+            Import GitHub Repo
+          </button>
         </div>
+
         <div className="flex-1 overflow-y-auto">
           <h3 className="px-4 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">Explorer</h3>
-          <ul className="space-y-1">
+          <ul className="space-y-0.5">
             {files.map(f => (
-              <li key={f.id}>
+              <li key={f.id} className="group relative">
                 <button
                   onClick={() => { setActiveFile(f); setShowSearch(false); }}
-                  className={`w-full text-left px-4 py-1.5 text-sm truncate transition-colors ${
+                  className={`w-full text-left px-4 py-1.5 pr-8 text-sm truncate transition-colors ${
                     activeFile?.id === f.id && !showSearch
                       ? 'bg-blue-600/20 text-blue-400 border-l-2 border-blue-500' 
                       : 'text-gray-400 hover:text-white hover:bg-gray-800 border-l-2 border-transparent'
@@ -153,6 +231,14 @@ const ProjectView = () => {
                 >
                   <span className="mr-2">📄</span>
                   {f.filename}
+                </button>
+                {/* Delete file button */}
+                <button
+                  onClick={() => setConfirmDeleteFileId(f.id)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded text-gray-700 hover:text-red-400 hover:bg-red-400/10 opacity-0 group-hover:opacity-100 transition-all"
+                  title="Delete file"
+                >
+                  {deletingFileId === f.id ? <Spinner small /> : <TrashIcon />}
                 </button>
               </li>
             ))}
@@ -223,7 +309,7 @@ const ProjectView = () => {
                 height="100%"
                 theme="vs-dark"
                 path={activeFile.filename}
-                defaultLanguage={activeFile.filename.split('.').pop() === 'js' ? 'javascript' : activeFile.filename.split('.').pop() === 'py' ? 'python' : 'plaintext'}
+                defaultLanguage={getLanguage(activeFile.filename)}
                 value={activeFile.content}
                 onMount={handleEditorDidMount}
                 options={{
@@ -236,7 +322,7 @@ const ProjectView = () => {
               />
             ) : (
               <div className="flex items-center justify-center h-full text-gray-500">
-                Select a file from the explorer to view its contents
+                Upload a file or import a GitHub repo to get started.
               </div>
             )
           )}
@@ -252,7 +338,6 @@ const ProjectView = () => {
           </h2>
         </div>
 
-        {/* AI Action Buttons */}
         <div className="p-2 border-b border-gray-800 grid grid-cols-2 gap-2 bg-gray-800/50">
           <button onClick={(e) => handleChatSubmit(e, 'explain')} className="text-xs py-1.5 px-2 bg-gray-700 hover:bg-gray-600 rounded text-gray-200 transition-colors">
             Explain Code
@@ -265,7 +350,6 @@ const ProjectView = () => {
           </button>
         </div>
 
-        {/* Chat History */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {chatHistory.map((msg, idx) => (
             <motion.div 
@@ -306,7 +390,6 @@ const ProjectView = () => {
           <div ref={chatEndRef} />
         </div>
 
-        {/* Chat Input */}
         <div className="p-3 bg-gray-900 border-t border-gray-700">
           <form onSubmit={(e) => handleChatSubmit(e, 'general')} className="flex relative">
             <input
@@ -328,6 +411,121 @@ const ProjectView = () => {
           </form>
         </div>
       </div>
+
+      {/* Confirm Delete File Modal */}
+      <AnimatePresence>
+        {confirmDeleteFileId && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-gray-800 rounded-xl shadow-2xl max-w-sm w-full border border-red-900/50 p-6"
+            >
+              <h3 className="text-base font-semibold text-white mb-2">Delete File</h3>
+              <p className="text-sm text-gray-400 mb-4">
+                This will permanently remove the file and all its vector embeddings from this project. This cannot be undone.
+              </p>
+              <div className="flex justify-end space-x-3">
+                <button
+                  onClick={() => setConfirmDeleteFileId(null)}
+                  className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-md text-sm font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => handleDeleteFile(confirmDeleteFileId)}
+                  disabled={deletingFileId === confirmDeleteFileId}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-md text-sm font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
+                >
+                  {deletingFileId === confirmDeleteFileId ? <><Spinner small />Deleting...</> : 'Delete File'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* GitHub Import Modal */}
+      <AnimatePresence>
+        {isGithubModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-gray-800 rounded-xl shadow-2xl max-w-lg w-full border border-purple-900/50 p-6"
+            >
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-9 h-9 rounded-lg bg-purple-500/20 flex items-center justify-center text-purple-400">
+                  <GithubIcon />
+                </div>
+                <div>
+                  <h3 className="text-base font-semibold text-white">Import GitHub Repository</h3>
+                  <p className="text-xs text-gray-400">All supported code files will be parsed and indexed.</p>
+                </div>
+              </div>
+
+              <form onSubmit={handleGithubImport} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-400 mb-1">Repository URL</label>
+                  <input
+                    type="url"
+                    required
+                    value={githubUrl}
+                    onChange={(e) => setGithubUrl(e.target.value)}
+                    placeholder="https://github.com/owner/repository"
+                    className="w-full bg-gray-900 border border-gray-700 rounded-md py-2.5 px-3 text-white focus:outline-none focus:ring-2 focus:ring-purple-500 text-sm"
+                    disabled={isImporting}
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Only public repositories are supported.</p>
+                </div>
+
+                {/* Result Message */}
+                {importResult && (
+                  <div className={`p-3 rounded-lg text-sm ${importResult.success ? 'bg-green-900/30 border border-green-700/50 text-green-300' : 'bg-red-900/30 border border-red-700/50 text-red-300'}`}>
+                    {importResult.success ? (
+                      <>
+                        <p className="font-medium">✅ Import Successful!</p>
+                        <p className="mt-1 text-green-400/80">{importResult.data.files_imported} files imported, {importResult.data.files_skipped} skipped.</p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="font-medium">❌ Import Failed</p>
+                        <p className="mt-1">{importResult.message}</p>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                <div className="flex justify-end space-x-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => { setIsGithubModalOpen(false); setImportResult(null); }}
+                    className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-md text-sm font-medium transition-colors"
+                    disabled={isImporting}
+                  >
+                    {importResult?.success ? 'Close' : 'Cancel'}
+                  </button>
+                  {!importResult?.success && (
+                    <button
+                      type="submit"
+                      disabled={isImporting || !githubUrl.trim()}
+                      className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-md text-sm font-medium transition-colors disabled:opacity-50 flex items-center gap-2"
+                    >
+                      {isImporting ? (
+                        <><Spinner small />Importing (this may take a minute)...</>
+                      ) : (
+                        <><GithubIcon /> Import Repository</>
+                      )}
+                    </button>
+                  )}
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

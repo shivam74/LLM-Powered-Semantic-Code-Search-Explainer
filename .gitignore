@@ -50,3 +50,6 @@ mongodb_data/
 # OS Files
 .DS_Store
 Thumbs.db
+
+# Sample/test codebases cloned for demo purposes
+sample_codebase/
